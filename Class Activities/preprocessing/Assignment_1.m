@@ -7,14 +7,15 @@ EEG = pop_loadset('eeglab_data.set', fullfile(fileparts(which('eeglab')), 'sampl
 data = EEG.data;       % channels x samples
 chan_labels = {EEG.chanlocs.labels};
 
-% -------------------------
+
+%% -------------------------
 % Step 1: Filtering: Notch filter at 60 Hz
 % -------------------------
 wo = 60/(EEG.srate/2); bo = wo/35;
-[bn,an] = iirnotch(wo, bo);
+[bn,an] = designNotchPeakIIR(CenterFrequency=wo, Bandwidth=bo, Response="notch");
 data_filt = filtfilt(bn,an,data')';
 
-% -------------------------
+%% -------------------------
 % Step 2: Plot PSD before & after filtering
 % -------------------------
 figure;
@@ -27,6 +28,10 @@ figure;
 % -------------------------
 avg_ref = mean(data_filt, 1);
 data_car = data_filt - avg_ref;
+%%
+figure;
+[~,~,~,~,~] = spectopo(data_car, size(data_car,2), EEG.srate);
+
 
 %% -------------------------
 % Step 4: Epoching around "rt"
@@ -52,7 +57,48 @@ end
 % -------------------------
 baseline_idx = 1:round(0.2*EEG.srate);
 baseline = mean(epochs(:,baseline_idx,:),2);
+
 epochs_bc = epochs - baseline;
+%%
+fs    = EEG.srate;                    % sampling rate
+win   = hamming(round(0.5*fs));       % 500 ms window
+nover = round(0.4*fs);                % 400 ms overlap
+nfft  = 2^nextpow2(length(win));      % FFT length
+
+nChans  =32;
+nTrials =74;
+
+% Preallocate
+P_all = [];
+
+for ch = 1:nChans
+    for tr = 1:nTrials
+        sig = squeeze(epochs_bc(ch,:,tr));
+
+        [~,F,T,P] = spectrogram(sig, win, nover, nfft, fs);
+
+        if isempty(P_all)
+             P_all = zeros([size(P), nChans, nTrials]);
+        end
+        P_all(:,:,ch,tr) = P;
+    end
+end
+
+% === Average across trials and channels ===
+P_mean = mean(P_all, [3 4]);
+
+% === Plot ===
+figure;
+surf(T, F, 10*log10(P_mean), 'EdgeColor', 'none');
+axis tight;
+view(0,90);
+xlabel('Time (s)');
+ylabel('Frequency (Hz)');
+title('Trial- and Channel-averaged Spectrogram');
+colorbar;
+
+
+
 
 %% -------------------------
 % Step 6: Improved Artifact Rejection
